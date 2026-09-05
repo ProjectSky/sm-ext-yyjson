@@ -1,5 +1,4 @@
-#ifndef _INCLUDE_SOURCEMOD_EXTENSION_PROPER_H_
-#define _INCLUDE_SOURCEMOD_EXTENSION_PROPER_H_
+#pragma once
 
 #include "smsdk_ext.h"
 #include "IJsonManager.h"
@@ -38,5 +37,3 @@ extern ArrIterHandler g_ArrIterHandler;
 extern ObjIterHandler g_ObjIterHandler;
 extern const sp_nativeinfo_t g_JsonNatives[];
 extern IJsonManager* g_pJsonManager;
-
-#endif // _INCLUDE_SOURCEMOD_EXTENSION_PROPER_H_

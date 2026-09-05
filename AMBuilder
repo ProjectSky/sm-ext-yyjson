@@ -10,7 +10,7 @@ for cxx in builder.targets:
   ]
 
   binary.sources += [
-    'third_party/yyjson/yyjson.c',
+    'third_party/yyjson/src/yyjson.c',
     'src/extension.cpp',
     'src/JsonManager.cpp',
     'src/JsonNatives.cpp',
@@ -20,7 +20,10 @@ for cxx in builder.targets:
   binary.compiler.includes += [
     os.path.join(builder.sourcePath, 'src'),
     os.path.join(builder.sourcePath, 'public'),
-    os.path.join(builder.sourcePath, 'third_party', 'yyjson'),
+    os.path.join(builder.sourcePath, 'third_party', 'yyjson', 'src'),
   ]
+ 
+  if binary.compiler.target.platform == 'windows':
+    binary.sources += ['src/version.rc']
 
   Extension.extensions += [builder.Add(binary)]

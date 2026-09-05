@@ -10,7 +10,7 @@ public Plugin myinfo =
 	author = "ProjectSky",
 	description = "test suite for JSON functions",
 	version = "1.0.0",
-	url = "https://github.com/ProjectSky/sm-ext-yyjson"
+	url = "https://github.com/ProjectSky/sm-ext-json"
 };
 
 // Test statistics
@@ -183,6 +183,14 @@ void AssertNullHandle(Handle handle, const char[] message = "")
 	Assert(handle == null, message[0] != '\0' ? message : "Handle should be null");
 }
 
+/**
+ * Assert value is null (alias for AssertNullHandle)
+ */
+void AssertNull(Handle handle, const char[] message = "")
+{
+	AssertNullHandle(handle, message);
+}
+
 // ============================================================================
 // Test Command
 // ============================================================================
@@ -208,6 +216,7 @@ public Action Command_RunTests(int args)
 	Test_AdvancedFeatures();
 	Test_Int64Operations();
 	Test_EdgeCases();
+	Test_ErrorHandling();
 
 	// Print results
 	PrintToServer("========================================");
@@ -1874,8 +1883,8 @@ void Test_Iterators()
 {
 	PrintToServer("\n[Category] Iterator Tests");
 
-	// Test ForeachObject
-	TestStart("Iterator_ForeachObject");
+	// Test Object Iterator
+	TestStart("Iterator_Object");
 	{
 		JSONObject obj = new JSONObject();
 		obj.SetInt("a", 1);
@@ -1912,8 +1921,8 @@ void Test_Iterators()
 	}
 	TestEnd();
 
-	// Test ForeachArray
-	TestStart("Iterator_ForeachArray");
+	// Test Array Iterator
+	TestStart("Iterator_Array");
 	{
 		JSONArray arr = new JSONArray();
 		arr.PushInt(10);
@@ -1951,8 +1960,8 @@ void Test_Iterators()
 	}
 	TestEnd();
 
-	// Test ForeachKey
-	TestStart("Iterator_ForeachKey");
+	// Test Object Iterator Keys
+	TestStart("Iterator_ObjectKeys");
 	{
 		JSONObject obj = new JSONObject();
 		obj.SetInt("key1", 1);
@@ -1985,8 +1994,8 @@ void Test_Iterators()
 	}
 	TestEnd();
 
-	// Test ForeachIndex
-	TestStart("Iterator_ForeachIndex");
+	// Test Array Iterator Index
+	TestStart("Iterator_ArrayIndex");
 	{
 		JSONArray arr = new JSONArray();
 		arr.PushInt(1);
@@ -2181,9 +2190,9 @@ void Test_JSONPointer()
 
 		AssertTrue(obj.PtrRemove("/remove_me"));
 
-		JSON val;
-		obj.PtrTryGetVal("/remove_me", val);
-		AssertNullHandle(val);
+		char error[256];
+		JSON val = obj.PtrGet("/remove_me", error, sizeof(error));
+		AssertNull(val);
 
 		delete obj;
 	}
@@ -2270,13 +2279,13 @@ void Test_JSONPointer()
 	}
 	TestEnd();
 
-	TestStart("Pointer_PtrTryGetVal");
+	TestStart("Pointer_PtrGet_WithError");
 	{
 		JSONObject obj = new JSONObject();
 		obj.PtrSetInt("/test", 42);
 
-		JSON value;
-		AssertTrue(obj.PtrTryGetVal("/test", value));
+		char error[256];
+		JSON value = obj.PtrGet("/test", error, sizeof(error));
 		AssertValidHandle(value);
 		AssertEq(value.GetInt(), 42);
 
@@ -3375,6 +3384,247 @@ void Test_EdgeCases()
 		delete first;
 		delete last;
 		delete arr;
+	}
+	TestEnd();
+}
+
+// ============================================================================
+// Error Handling Tests
+// ============================================================================
+
+void Test_ErrorHandling()
+{
+	PrintToServer("\n[Category] Error Handling Tests");
+
+	// Test JSONObject.Get with error parameter
+	TestStart("ErrorHandling_ObjectGet_WithError");
+	{
+		JSONObject obj = new JSONObject();
+		char error[256];
+		JSON val = obj.Get("nonexistent", error, sizeof(error));
+
+		AssertNull(val, "Should return null for nonexistent key");
+		Assert(strlen(error) > 0, "Should write error message");
+
+		delete obj;
+	}
+	TestEnd();
+
+	// Test JSONArray.Get with error parameter
+	TestStart("ErrorHandling_ArrayGet_WithError");
+	{
+		JSONArray arr = new JSONArray();
+		char error[256];
+		JSON val = arr.Get(0, error, sizeof(error));
+
+		AssertNull(val, "Should return null for out of bounds index");
+		Assert(strlen(error) > 0, "Should write error message");
+
+		delete arr;
+	}
+	TestEnd();
+
+	// Test JSON.Parse with error parameter
+	TestStart("ErrorHandling_Parse_WithError");
+	{
+		char error[256];
+		JSON val = JSON.Parse("{invalid json}", false, false, JSON_READ_NOFLAG, error, sizeof(error));
+
+		AssertNull(val, "Should return null for invalid JSON");
+		Assert(strlen(error) > 0, "Should write error message");
+	}
+	TestEnd();
+
+	// Test JSONObject.FromString with error parameter
+	TestStart("ErrorHandling_ObjectFromString_WithError");
+	{
+		char error[256];
+		JSONObject obj = JSONObject.FromString("[1,2,3]", JSON_READ_NOFLAG, error, sizeof(error));
+
+		AssertNull(obj, "Should return null for array when expecting object");
+		Assert(strlen(error) > 0, "Should write error message");
+	}
+	TestEnd();
+
+	// Test JSONArray.FromString with error parameter
+	TestStart("ErrorHandling_ArrayFromString_WithError");
+	{
+		char error[256];
+		JSONArray arr = JSONArray.FromString("{\"key\":\"value\"}", JSON_READ_NOFLAG, error, sizeof(error));
+
+		AssertNull(arr, "Should return null for object when expecting array");
+		Assert(strlen(error) > 0, "Should write error message");
+	}
+	TestEnd();
+
+	// Test JSON.PtrGet with error parameter
+	TestStart("ErrorHandling_PtrGet_WithError");
+	{
+		JSONObject obj = new JSONObject();
+		char error[256];
+		JSON val = obj.PtrGet("/does/not/exist", error, sizeof(error));
+
+		AssertNull(val, "Should return null for nonexistent path");
+		Assert(strlen(error) > 0, "Should write error message");
+
+		delete obj;
+	}
+	TestEnd();
+
+	// Test JSONObject.FromStrings with error parameter - odd number of strings
+	TestStart("ErrorHandling_ObjectFromStrings_OddCount");
+	{
+		char error[256];
+		char[][] pairs = new char[3][32];
+		strcopy(pairs[0], 32, "key1");
+		strcopy(pairs[1], 32, "value1");
+		strcopy(pairs[2], 32, "key2");
+
+		JSONObject obj = JSONObject.FromStrings(pairs, 3, error, sizeof(error));
+
+		AssertNull(obj, "Should return null for odd number of strings");
+		Assert(strlen(error) > 0, "Should write error message");
+	}
+	TestEnd();
+
+	// Test JSONArray.Get with negative index
+	TestStart("ErrorHandling_ArrayGet_NegativeIndex");
+	{
+		JSONArray arr = new JSONArray();
+		arr.PushInt(42);
+
+		char error[256];
+		JSON val = arr.Get(-1, error, sizeof(error));
+
+		AssertNull(val, "Should return null for negative index");
+		Assert(strlen(error) > 0, "Should write error message");
+
+		delete arr;
+	}
+	TestEnd();
+
+	// Test successful operation with error parameter clears stale errors
+	TestStart("ErrorHandling_Success_ClearsError");
+	{
+		JSONObject obj = new JSONObject();
+		obj.SetInt("key", 42);
+
+		char error[256] = "initial";
+		JSON val = obj.Get("key", error, sizeof(error));
+
+		AssertValidHandle(val, "Should return valid handle");
+		AssertEq(val.GetInt(), 42, "Should get correct value");
+		AssertStrEq(error, "", "Should clear error buffer on success");
+
+		delete val;
+		delete obj;
+	}
+	TestEnd();
+
+	// Test JSON.ApplyJsonPatch with error parameter
+	TestStart("ErrorHandling_ApplyJsonPatch_WithError");
+	{
+		JSONObject obj = new JSONObject();
+		obj.SetInt("value", 42);
+
+		// Invalid patch (missing required fields)
+		JSONArray patch = new JSONArray();
+		JSONObject op = new JSONObject();
+		op.SetString("invalid", "operation");
+		patch.Push(op);
+
+		char error[256];
+		JSON result = obj.ApplyJsonPatch(patch, false, error, sizeof(error));
+
+		AssertNull(result, "Should return null for invalid patch");
+		Assert(strlen(error) > 0, "Should write error message");
+
+		delete op;
+		delete patch;
+		delete obj;
+	}
+	TestEnd();
+
+	// Test JSONObject.GetValueAt with error parameter
+	TestStart("ErrorHandling_ObjectGetValueAt_WithError");
+	{
+		JSONObject obj = new JSONObject();
+		obj.SetInt("key", 42);
+
+		char error[256];
+		JSON val = obj.GetValueAt(999, error, sizeof(error));
+
+		AssertNull(val, "Should return null for out of bounds index");
+		Assert(strlen(error) > 0, "Should write error message");
+
+		delete obj;
+	}
+	TestEnd();
+
+	// Test JSONObject.FromFile with error parameter
+	TestStart("ErrorHandling_ObjectFromFile_WithError");
+	{
+		char error[256];
+		JSONObject obj = JSONObject.FromFile("/nonexistent/file.json", JSON_READ_NOFLAG, error, sizeof(error));
+
+		AssertNull(obj, "Should return null for nonexistent file");
+		Assert(strlen(error) > 0, "Should write error message");
+	}
+	TestEnd();
+
+	// Test JSONArray.FromFile with error parameter
+	TestStart("ErrorHandling_ArrayFromFile_WithError");
+	{
+		char error[256];
+		JSONArray arr = JSONArray.FromFile("/nonexistent/file.json", JSON_READ_NOFLAG, error, sizeof(error));
+
+		AssertNull(arr, "Should return null for nonexistent file");
+		Assert(strlen(error) > 0, "Should write error message");
+	}
+	TestEnd();
+
+	// Test JSONArray.FromInt64 with error parameter
+	TestStart("ErrorHandling_ArrayFromInt64_WithError");
+	{
+		char error[256];
+		char[][] values = new char[2][32];
+		strcopy(values[0], 32, "123");
+		strcopy(values[1], 32, "not_a_number");
+
+		JSONArray arr = JSONArray.FromInt64(values, 2, error, sizeof(error));
+
+		AssertNull(arr, "Should return null for invalid int64 value");
+		Assert(strlen(error) > 0, "Should write error message");
+	}
+	TestEnd();
+
+	// Test JSON.ReadNumber with error parameter
+	TestStart("ErrorHandling_ReadNumber_WithError");
+	{
+		char error[256];
+		JSON val = JSON.ReadNumber("not_a_number", JSON_READ_NOFLAG, _, error, sizeof(error));
+
+		AssertNull(val, "Should return null for invalid number");
+		Assert(strlen(error) > 0, "Should write error message");
+	}
+	TestEnd();
+
+	// Test JSONObjIter.Get with error parameter
+	TestStart("ErrorHandling_ObjIterGet_WithError");
+	{
+		JSONObject obj = new JSONObject();
+		obj.SetInt("key1", 1);
+		obj.SetInt("key2", 2);
+
+		JSONObjIter iter = new JSONObjIter(obj);
+		char error[256];
+		JSON val = iter.Get("nonexistent", error, sizeof(error));
+
+		AssertNull(val, "Should return null for nonexistent key");
+		Assert(strlen(error) > 0, "Should write error message");
+
+		delete iter;
+		delete obj;
 	}
 	TestEnd();
 }

@@ -1,13 +1,6 @@
-#ifndef _INCLUDE_IJSONMANAGER_H_
-#define _INCLUDE_IJSONMANAGER_H_
+#pragma once
 
 #include <IHandleSys.h>
-#include <variant>
-
-using SourceMod::Handle_t;
-using SourceMod::HandleType_t;
-using SourceMod::SMInterface;
-using SourcePawn::IPluginContext;
 
 // Forward declaration
 class JsonValue;
@@ -15,7 +8,7 @@ class JsonArrIter;
 class JsonObjIter;
 
 #define SMINTERFACE_JSONMANAGER_NAME "IJsonManager"
-#define SMINTERFACE_JSONMANAGER_VERSION 3
+#define SMINTERFACE_JSONMANAGER_VERSION 4
 #define JSON_ERROR_BUFFER_SIZE 256
 #define JSON_INT64_BUFFER_SIZE 32
 
@@ -60,7 +53,7 @@ public:
  *     SM_GET_LATE_IFACE(JSONMANAGER, g_pJsonManager);
  * }
  */
-class IJsonManager : public SMInterface
+class IJsonManager : public SourceMod::SMInterface
 {
 public:
 	virtual ~IJsonManager() = default;
@@ -94,6 +87,8 @@ public:
 	 * @param buffer_size Buffer size
 	 * @param write_flg Write flags (YYJSON_WRITE_FLAG values, default: 0)
 	 * @param out_size Pointer to receive actual size written (including null terminator) optional
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
 	 * @return true on success, false if buffer is too small or on error
 	 *
 	 * @note The out_size parameter returns the size including null terminator
@@ -115,20 +110,27 @@ public:
 	 *       Use this method only when you need to avoid heap allocation (e.g., stack buffers, pre-allocated pools)
 	 */
 	virtual bool WriteToString(JsonValue* handle, char* buffer, size_t buffer_size,
-		uint32_t write_flg = 0, size_t* out_size = nullptr) = 0;
+		uint32_t write_flg = 0, size_t* out_size = nullptr, char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
 	 * Write JSON to string and return allocated string
 	 * @param handle JSON value
 	 * @param write_flg Write flags (YYJSON_WRITE_FLAG values, default: 0)
 	 * @param out_size Pointer to receive actual size written (including null terminator) optional
-	 * @return Allocated string pointer on success, nullptr on error. Caller must free() the returned pointer
+	 * @return Allocated string pointer on success, nullptr on error. Release with ReleaseString().
 	 *
 	 * @note This function handles memory allocation internally,
 	 *       avoiding the complexity of manual buffer size calculation required by WriteToString()
 	 * @note This is the recommended method for most use cases due to its simplicity and safety
 	 */
 	virtual char* WriteToStringPtr(JsonValue* handle, uint32_t write_flg = 0, size_t* out_size = nullptr) = 0;
+
+	/**
+	 * Release a string returned by WriteToStringPtr().
+	 * @param buffer String returned by WriteToStringPtr(), or nullptr
+	 * @note Do not pass memory allocated by any other source.
+	 */
+	virtual void ReleaseString(char* buffer) = 0;
 
 	/**
 	 * Apply JSON Patch (RFC 6902) and return a new JSON value
@@ -194,6 +196,8 @@ public:
 	 * @param handle2 Second JSON value to compare
 	 * @return true if values are equal, false otherwise
 	 * @note Compares structure and content recursively
+	 * @note The result may be inaccurate if object has duplicate keys
+	 * @warning This function is recursive and may cause a stack overflow if the object level is too deep
 	 */
 	virtual bool Equals(JsonValue* handle1, JsonValue* handle2) = 0;
 
@@ -210,15 +214,21 @@ public:
 	 * Deep copy a JSON value into a target document
 	 * @param targetDoc Target document that will own the copied value
 	 * @param sourceValue Source value to copy
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
 	 * @return New JSON value (deep copy) or nullptr on failure
 	 * @note The returned value is owned by targetDoc's document context
+	 * @note The mutability of the returned copy depends on the targetDoc parameter
+	 * @warning This function is recursive and may cause a stack overflow if the object level is too deep
 	 */
-	virtual JsonValue* DeepCopy(JsonValue* targetDoc, JsonValue* sourceValue) = 0;
+	virtual JsonValue* DeepCopy(JsonValue* targetDoc, JsonValue* sourceValue,
+		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
 	 * Get human-readable type description string
 	 * @param handle JSON value
-	 * @return Type description string (e.g., "object", "array", "string", "number", "true", "false", "unknown")
+	 * @return Type description string (e.g., "raw", "null", "string", "array", "object",
+	 *         "true", "false", "uint", "sint", "real", "unknown")
 	 */
 	virtual const char* GetTypeDesc(JsonValue* handle) = 0;
 
@@ -246,18 +256,24 @@ public:
 	/**
 	 * Convert immutable document to mutable
 	 * @param handle Immutable JSON value
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
 	 * @return New mutable JSON value or nullptr if already mutable or on error
 	 * @note Creates a deep copy as a mutable document
 	 */
-	virtual JsonValue* ToMutable(JsonValue* handle) = 0;
+	virtual JsonValue* ToMutable(JsonValue* handle,
+		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
 	 * Convert mutable document to immutable
 	 * @param handle Mutable JSON value
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
 	 * @return New immutable JSON value or nullptr if already immutable or on error
 	 * @note Creates a deep copy as an immutable document
 	 */
-	virtual JsonValue* ToImmutable(JsonValue* handle) = 0;
+	virtual JsonValue* ToImmutable(JsonValue* handle,
+		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
 	 * Get JSON type
@@ -386,6 +402,8 @@ public:
 	 * @note This value only applies to documents created from parsing
 	 * @note Manually created documents (ObjectInit, CreateBool, etc.) will return 0
 	 * @note The returned size includes the null terminator
+	 * @note This value does not auto-update if the document is modified
+	 * @note For modified documents, use GetSerializedSize() to obtain the current size
 	 */
 	virtual size_t GetReadSize(JsonValue* handle) = 0;
 
@@ -475,6 +493,7 @@ public:
 	 * @param handle JSON object
 	 * @param key Key name
 	 * @return JSON value or nullptr if key not found
+	 * @note This function takes a linear search time
 	 */
 	virtual JsonValue* ObjectGet(JsonValue* handle, const char* key) = 0;
 
@@ -507,13 +526,22 @@ public:
 	virtual bool ObjectGetInt(JsonValue* handle, const char* key, int* out_value) = 0;
 
 	/**
-	 * Get 64-bit integer value by key (auto-detects signed/unsigned)
+	 * Get signed 64-bit integer value by key
 	 * @param handle JSON object
 	 * @param key Key name
-	 * @param out_value Pointer to receive 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param out_value Pointer to receive signed 64-bit integer value
 	 * @return true on success, false if key not found or type mismatch
 	 */
-	virtual bool ObjectGetInt64(JsonValue* handle, const char* key, std::variant<int64_t, uint64_t>* out_value) = 0;
+	virtual bool ObjectGetInt64(JsonValue* handle, const char* key, int64_t* out_value) = 0;
+
+	/**
+	 * Get unsigned 64-bit integer value by key
+	 * @param handle JSON object
+	 * @param key Key name
+	 * @param out_value Pointer to receive unsigned 64-bit integer value
+	 * @return true on success, false if key not found or type mismatch
+	 */
+	virtual bool ObjectGetUint64(JsonValue* handle, const char* key, uint64_t* out_value) = 0;
 
 	/**
 	 * Get string value by key
@@ -551,6 +579,7 @@ public:
 	 * @param allow_duplicate Allow duplicate key names
 	 * @return true on success
 	 * @note Only works on mutable objects
+	 * @note This function takes a linear search time
 	 */
 	virtual bool ObjectRenameKey(JsonValue* handle, const char* old_key, const char* new_key, bool allow_duplicate) = 0;
 
@@ -591,13 +620,22 @@ public:
 	virtual bool ObjectSetInt(JsonValue* handle, const char* key, int value) = 0;
 
 	/**
-	 * Set 64-bit integer value by key (mutable only, auto-detects signed/unsigned)
+	 * Set signed 64-bit integer value by key (mutable only)
 	 * @param handle Mutable JSON object
 	 * @param key Key name
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param value Signed 64-bit integer value
 	 * @return true on success
 	 */
-	virtual bool ObjectSetInt64(JsonValue* handle, const char* key, std::variant<int64_t, uint64_t> value) = 0;
+	virtual bool ObjectSetInt64(JsonValue* handle, const char* key, int64_t value) = 0;
+
+	/**
+	 * Set unsigned 64-bit integer value by key (mutable only)
+	 * @param handle Mutable JSON object
+	 * @param key Key name
+	 * @param value Unsigned 64-bit integer value
+	 * @return true on success
+	 */
+	virtual bool ObjectSetUint64(JsonValue* handle, const char* key, uint64_t value) = 0;
 
 	/**
 	 * Set null value by key (mutable only)
@@ -621,6 +659,8 @@ public:
 	 * @param handle Mutable JSON object
 	 * @param key Key name
 	 * @return true on success
+	 * @note This function takes a linear search time
+	 * @note If duplicate keys exist, all matching key-value pairs are removed
 	 */
 	virtual bool ObjectRemove(JsonValue* handle, const char* key) = 0;
 
@@ -637,6 +677,8 @@ public:
 	 * @param sort_mode Sort order (see JSON_SORT_ORDER enum)
 	 * @return true on success
 	 * @note Only works on mutable objects
+	 * @note Performs a lexicographical sort on the object's keys
+	 * @note The values maintain their association with their respective keys
 	 */
 	virtual bool ObjectSort(JsonValue* handle, JSON_SORT_ORDER sort_mode) = 0;
 
@@ -670,9 +712,12 @@ public:
 	 * Create a JSON array from 32-bit integer values
 	 * @param values Array of int32_t values
 	 * @param count Number of values
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
 	 * @return New JSON array or nullptr on failure
 	 */
-	virtual JsonValue* ArrayInitWithInt32(const int32_t* values, size_t count) = 0;
+	virtual JsonValue* ArrayInitWithInt32(const int32_t* values, size_t count,
+		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
 	 * Create a JSON array from 64-bit integer string values (auto-detects signed/unsigned)
@@ -690,17 +735,23 @@ public:
 	 * Create a JSON array from boolean values
 	 * @param values Array of boolean values
 	 * @param count Number of values
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
 	 * @return New JSON array or nullptr on failure
 	 */
-	virtual JsonValue* ArrayInitWithBool(const bool* values, size_t count) = 0;
+	virtual JsonValue* ArrayInitWithBool(const bool* values, size_t count,
+		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
 	 * Create a JSON array from double values
 	 * @param values Array of double values
 	 * @param count Number of values
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
 	 * @return New JSON array or nullptr on failure
 	 */
-	virtual JsonValue* ArrayInitWithDouble(const double* values, size_t count) = 0;
+	virtual JsonValue* ArrayInitWithDouble(const double* values, size_t count,
+		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
 	 * Parse a JSON array from string
@@ -738,6 +789,7 @@ public:
 	 * @param handle JSON array
 	 * @param index Element index
 	 * @return JSON value or nullptr if index out of bounds
+	 * @note This function takes a linear search time
 	 */
 	virtual JsonValue* ArrayGet(JsonValue* handle, size_t index) = 0;
 
@@ -745,6 +797,7 @@ public:
 	 * Get first element in array
 	 * @param handle JSON array
 	 * @return First JSON value or nullptr if array is empty
+	 * @note This function takes a linear search time
 	 */
 	virtual JsonValue* ArrayGetFirst(JsonValue* handle) = 0;
 
@@ -752,6 +805,7 @@ public:
 	 * Get last element in array
 	 * @param handle JSON array
 	 * @return Last JSON value or nullptr if array is empty
+	 * @note This function takes a linear search time
 	 */
 	virtual JsonValue* ArrayGetLast(JsonValue* handle) = 0;
 
@@ -784,13 +838,22 @@ public:
 	virtual bool ArrayGetInt(JsonValue* handle, size_t index, int* out_value) = 0;
 
 	/**
-	 * Get 64-bit integer value at index (auto-detects signed/unsigned)
+	 * Get signed 64-bit integer value at index
 	 * @param handle JSON array
 	 * @param index Element index
-	 * @param out_value Pointer to receive 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param out_value Pointer to receive signed 64-bit integer value
 	 * @return true on success, false if index out of bounds or type mismatch
 	 */
-	virtual bool ArrayGetInt64(JsonValue* handle, size_t index, std::variant<int64_t, uint64_t>* out_value) = 0;
+	virtual bool ArrayGetInt64(JsonValue* handle, size_t index, int64_t* out_value) = 0;
+
+	/**
+	 * Get unsigned 64-bit integer value at index
+	 * @param handle JSON array
+	 * @param index Element index
+	 * @param out_value Pointer to receive unsigned 64-bit integer value
+	 * @return true on success, false if index out of bounds or type mismatch
+	 */
+	virtual bool ArrayGetUint64(JsonValue* handle, size_t index, uint64_t* out_value) = 0;
 
 	/**
 	 * Get string value at index
@@ -816,6 +879,7 @@ public:
 	 * @param index Element index
 	 * @param value JSON value to set
 	 * @return true on success
+	 * @note This function takes a linear search time
 	 */
 	virtual bool ArrayReplace(JsonValue* handle, size_t index, JsonValue* value) = 0;
 
@@ -847,13 +911,22 @@ public:
 	virtual bool ArrayReplaceInt(JsonValue* handle, size_t index, int value) = 0;
 
 	/**
-	 * Replace element at index with 64-bit integer (mutable only, auto-detects signed/unsigned)
+	 * Replace element at index with signed 64-bit integer (mutable only)
 	 * @param handle Mutable JSON array
 	 * @param index Element index
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param value Signed 64-bit integer value
 	 * @return true on success
 	 */
-	virtual bool ArrayReplaceInt64(JsonValue* handle, size_t index, std::variant<int64_t, uint64_t> value) = 0;
+	virtual bool ArrayReplaceInt64(JsonValue* handle, size_t index, int64_t value) = 0;
+
+	/**
+	 * Replace element at index with unsigned 64-bit integer (mutable only)
+	 * @param handle Mutable JSON array
+	 * @param index Element index
+	 * @param value Unsigned 64-bit integer value
+	 * @return true on success
+	 */
+	virtual bool ArrayReplaceUint64(JsonValue* handle, size_t index, uint64_t value) = 0;
 
 	/**
 	 * Replace element at index with null (mutable only)
@@ -905,12 +978,20 @@ public:
 	virtual bool ArrayAppendInt(JsonValue* handle, int value) = 0;
 
 	/**
-	 * Append 64-bit integer to end of array (mutable only, auto-detects signed/unsigned)
+	 * Append signed 64-bit integer to end of array (mutable only)
 	 * @param handle Mutable JSON array
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param value Signed 64-bit integer value
 	 * @return true on success
 	 */
-	virtual bool ArrayAppendInt64(JsonValue* handle, std::variant<int64_t, uint64_t> value) = 0;
+	virtual bool ArrayAppendInt64(JsonValue* handle, int64_t value) = 0;
+
+	/**
+	 * Append unsigned 64-bit integer to end of array (mutable only)
+	 * @param handle Mutable JSON array
+	 * @param value Unsigned 64-bit integer value
+	 * @return true on success
+	 */
+	virtual bool ArrayAppendUint64(JsonValue* handle, uint64_t value) = 0;
 
 	/**
 	 * Append null to end of array (mutable only)
@@ -933,6 +1014,7 @@ public:
 	 * @param index Element index (0 to size, size means append)
 	 * @param value JSON value to insert
 	 * @return true on success
+	 * @note This function takes a linear search time
 	 */
 	virtual bool ArrayInsert(JsonValue* handle, size_t index, JsonValue* value) = 0;
 
@@ -955,13 +1037,22 @@ public:
 	virtual bool ArrayInsertInt(JsonValue* handle, size_t index, int value) = 0;
 
 	/**
-	 * Insert 64-bit integer at specific index (mutable only, auto-detects signed/unsigned)
+	 * Insert signed 64-bit integer at specific index (mutable only)
 	 * @param handle Mutable JSON array
 	 * @param index Element index
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param value Signed 64-bit integer value
 	 * @return true on success
 	 */
-	virtual bool ArrayInsertInt64(JsonValue* handle, size_t index, std::variant<int64_t, uint64_t> value) = 0;
+	virtual bool ArrayInsertInt64(JsonValue* handle, size_t index, int64_t value) = 0;
+
+	/**
+	 * Insert unsigned 64-bit integer at specific index (mutable only)
+	 * @param handle Mutable JSON array
+	 * @param index Element index
+	 * @param value Unsigned 64-bit integer value
+	 * @return true on success
+	 */
+	virtual bool ArrayInsertUint64(JsonValue* handle, size_t index, uint64_t value) = 0;
 
 	/**
 	 * Insert double at specific index (mutable only)
@@ -1014,12 +1105,20 @@ public:
 	virtual bool ArrayPrependInt(JsonValue* handle, int value) = 0;
 
 	/**
-	 * Prepend 64-bit integer to beginning of array (mutable only, auto-detects signed/unsigned)
+	 * Prepend signed 64-bit integer to beginning of array (mutable only)
 	 * @param handle Mutable JSON array
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param value Signed 64-bit integer value
 	 * @return true on success
 	 */
-	virtual bool ArrayPrependInt64(JsonValue* handle, std::variant<int64_t, uint64_t> value) = 0;
+	virtual bool ArrayPrependInt64(JsonValue* handle, int64_t value) = 0;
+
+	/**
+	 * Prepend unsigned 64-bit integer to beginning of array (mutable only)
+	 * @param handle Mutable JSON array
+	 * @param value Unsigned 64-bit integer value
+	 * @return true on success
+	 */
+	virtual bool ArrayPrependUint64(JsonValue* handle, uint64_t value) = 0;
 
 	/**
 	 * Prepend double to beginning of array (mutable only)
@@ -1049,6 +1148,7 @@ public:
 	 * @param handle Mutable JSON array
 	 * @param index Element index
 	 * @return true on success
+	 * @note This function takes a linear search time
 	 */
 	virtual bool ArrayRemove(JsonValue* handle, size_t index) = 0;
 
@@ -1072,6 +1172,7 @@ public:
 	 * @param start_index Start index (inclusive)
 	 * @param count Number of elements to remove
 	 * @return true on success
+	 * @note This function takes a linear search time
 	 */
 	virtual bool ArrayRemoveRange(JsonValue* handle, size_t start_index, size_t count) = 0;
 
@@ -1107,12 +1208,20 @@ public:
 	virtual int ArrayIndexOfInt(JsonValue* handle, int search_value) = 0;
 
 	/**
-	 * Find index of 64-bit integer value (auto-detects signed/unsigned)
+	 * Find index of signed 64-bit integer value
 	 * @param handle JSON array
-	 * @param search_value 64-bit integer value to search for (std::variant<int64_t, uint64_t>)
+	 * @param search_value Signed 64-bit integer value to search for
 	 * @return Index of first match, or -1 if not found
 	 */
-	virtual int ArrayIndexOfInt64(JsonValue* handle, std::variant<int64_t, uint64_t> search_value) = 0;
+	virtual int ArrayIndexOfInt64(JsonValue* handle, int64_t search_value) = 0;
+
+	/**
+	 * Find index of unsigned 64-bit integer value
+	 * @param handle JSON array
+	 * @param search_value Unsigned 64-bit integer value to search for
+	 * @return Index of first match, or -1 if not found
+	 */
+	virtual int ArrayIndexOfUint64(JsonValue* handle, uint64_t search_value) = 0;
 
 	/**
 	 * Find index of double value
@@ -1128,6 +1237,8 @@ public:
 	 * @param sort_mode Sort order (see JSON_SORT_ORDER enum)
 	 * @return true on success
 	 * @note Only works on mutable arrays
+	 * @note Sorting rules: different types are sorted by type ID, strings lexicographically,
+	 *       numbers by numeric value, booleans with false before true, other types by type only
 	 */
 	virtual bool ArraySort(JsonValue* handle, JSON_SORT_ORDER sort_mode) = 0;
 
@@ -1185,11 +1296,24 @@ public:
 	virtual JsonValue* CreateInt(int value) = 0;
 
 	/**
-	 * Create a JSON 64-bit integer value (auto-detects signed/unsigned)
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * Create a JSON signed 64-bit integer value
+	 * @param value Signed 64-bit integer value
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
 	 * @return New JSON integer64 or nullptr on failure
 	 */
-	virtual JsonValue* CreateInt64(std::variant<int64_t, uint64_t> value) = 0;
+	virtual JsonValue* CreateInt64(int64_t value,
+		char* error = nullptr, size_t error_size = 0) = 0;
+
+	/**
+	 * Create a JSON unsigned 64-bit integer value
+	 * @param value Unsigned 64-bit integer value
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
+	 * @return New JSON unsigned integer or nullptr on failure
+	 */
+	virtual JsonValue* CreateUint64(uint64_t value,
+		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
 	 * Create a JSON null value
@@ -1230,12 +1354,20 @@ public:
 	virtual bool GetInt(JsonValue* handle, int* out_value) = 0;
 
 	/**
-	 * Get 64-bit integer value from JSON (auto-detects signed/unsigned)
+	 * Get signed 64-bit integer value from JSON
 	 * @param handle JSON value
-	 * @param out_value Pointer to receive 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param out_value Pointer to receive signed 64-bit integer value
 	 * @return true on success, false on type mismatch
 	 */
-	virtual bool GetInt64(JsonValue* handle, std::variant<int64_t, uint64_t>* out_value) = 0;
+	virtual bool GetInt64(JsonValue* handle, int64_t* out_value) = 0;
+
+	/**
+	 * Get unsigned 64-bit integer value from JSON
+	 * @param handle JSON value
+	 * @param out_value Pointer to receive unsigned 64-bit integer value
+	 * @return true on success, false on type mismatch
+	 */
+	virtual bool GetUint64(JsonValue* handle, uint64_t* out_value) = 0;
 
 	/**
 	 * Get string value from JSON
@@ -1253,6 +1385,7 @@ public:
 	 * @param error Error buffer (optional)
 	 * @param error_size Error buffer size
 	 * @return JSON value or nullptr on error
+	 * @note JSON Pointer paths are always resolved from the document root, not from the current value
 	 */
 	virtual JsonValue* PtrGet(JsonValue* handle, const char* path,
 		char* error = nullptr, size_t error_size = 0) = 0;
@@ -1295,15 +1428,27 @@ public:
 		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
-	 * Get 64-bit integer value using JSON Pointer (auto-detects signed/unsigned)
+	 * Get signed 64-bit integer value using JSON Pointer
 	 * @param handle JSON value
 	 * @param path JSON Pointer path
-	 * @param out_value Pointer to receive 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param out_value Pointer to receive signed 64-bit integer value
 	 * @param error Error buffer (optional)
 	 * @param error_size Error buffer size
 	 * @return true on success, false on error
 	 */
-	virtual bool PtrGetInt64(JsonValue* handle, const char* path, std::variant<int64_t, uint64_t>* out_value,
+	virtual bool PtrGetInt64(JsonValue* handle, const char* path, int64_t* out_value,
+		char* error = nullptr, size_t error_size = 0) = 0;
+
+	/**
+	 * Get unsigned 64-bit integer value using JSON Pointer
+	 * @param handle JSON value
+	 * @param path JSON Pointer path
+	 * @param out_value Pointer to receive unsigned 64-bit integer value
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
+	 * @return true on success, false on error
+	 */
+	virtual bool PtrGetUint64(JsonValue* handle, const char* path, uint64_t* out_value,
 		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
@@ -1332,13 +1477,17 @@ public:
 		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
-	 * Get length of container (array/object) using JSON Pointer
+	 * Get JSON content length (string length, array size, object size) using JSON Pointer
 	 * @param handle JSON value
 	 * @param path JSON Pointer path
 	 * @param out_len Pointer to receive length
 	 * @param error Error buffer (optional)
 	 * @param error_size Error buffer size
 	 * @return true on success, false on error
+	 * @note JSON Pointer paths are always resolved from the document root, not from the current value
+	 * @note For strings: returns string length including null-terminator
+	 * @note For arrays/objects: returns number of elements
+	 * @note Returns 0 via out_len if value is null or type is not string/array/object
 	 */
 	virtual bool PtrGetLength(JsonValue* handle, const char* path, size_t* out_len,
 		char* error = nullptr, size_t error_size = 0) = 0;
@@ -1351,6 +1500,9 @@ public:
 	 * @param error Error buffer (optional)
 	 * @param error_size Error buffer size
 	 * @return true on success, false on error
+	 * @note JSON Pointer paths are always resolved from the document root, not from the current value
+	 * @note The parent nodes will be created if they do not exist.
+	 *       If the target value already exists, it will be replaced by the new value
 	 */
 	virtual bool PtrSet(JsonValue* handle, const char* path, JsonValue* value,
 		char* error = nullptr, size_t error_size = 0) = 0;
@@ -1392,15 +1544,27 @@ public:
 		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
-	 * Set 64-bit integer value using JSON Pointer (mutable only, auto-detects signed/unsigned)
+	 * Set signed 64-bit integer value using JSON Pointer (mutable only)
 	 * @param handle Mutable JSON value
 	 * @param path JSON Pointer path
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param value Signed 64-bit integer value
 	 * @param error Error buffer (optional)
 	 * @param error_size Error buffer size
 	 * @return true on success, false on error
 	 */
-	virtual bool PtrSetInt64(JsonValue* handle, const char* path, std::variant<int64_t, uint64_t> value,
+	virtual bool PtrSetInt64(JsonValue* handle, const char* path, int64_t value,
+		char* error = nullptr, size_t error_size = 0) = 0;
+
+	/**
+	 * Set unsigned 64-bit integer value using JSON Pointer (mutable only)
+	 * @param handle Mutable JSON value
+	 * @param path JSON Pointer path
+	 * @param value Unsigned 64-bit integer value
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
+	 * @return true on success, false on error
+	 */
+	virtual bool PtrSetUint64(JsonValue* handle, const char* path, uint64_t value,
 		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
@@ -1475,15 +1639,27 @@ public:
 		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
-	 * Add 64-bit integer to array using JSON Pointer (mutable only, auto-detects signed/unsigned)
+	 * Add signed 64-bit integer to array using JSON Pointer (mutable only)
 	 * @param handle Mutable JSON value
 	 * @param path JSON Pointer path to array
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param value Signed 64-bit integer value
 	 * @param error Error buffer (optional)
 	 * @param error_size Error buffer size
 	 * @return true on success, false on error
 	 */
-	virtual bool PtrAddInt64(JsonValue* handle, const char* path, std::variant<int64_t, uint64_t> value,
+	virtual bool PtrAddInt64(JsonValue* handle, const char* path, int64_t value,
+		char* error = nullptr, size_t error_size = 0) = 0;
+
+	/**
+	 * Add unsigned 64-bit integer value using JSON Pointer (mutable only)
+	 * @param handle Mutable JSON value
+	 * @param path JSON Pointer path
+	 * @param value Unsigned 64-bit integer value
+	 * @param error Error buffer (optional)
+	 * @param error_size Error buffer size
+	 * @return true on success, false on error
+	 */
+	virtual bool PtrAddUint64(JsonValue* handle, const char* path, uint64_t value,
 		char* error = nullptr, size_t error_size = 0) = 0;
 
 	/**
@@ -1557,13 +1733,22 @@ public:
 	virtual bool PtrTryGetInt(JsonValue* handle, const char* path, int* out_value) = 0;
 
 	/**
-	 * Try to get 64-bit integer value using JSON Pointer (auto-detects signed/unsigned, returns false on failure)
+	 * Try to get signed 64-bit integer value using JSON Pointer (returns false on failure)
 	 * @param handle JSON value
 	 * @param path JSON Pointer path
-	 * @param out_value Pointer to receive 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param out_value Pointer to receive signed 64-bit integer value
 	 * @return true on success, false if not found or type mismatch
 	 */
-	virtual bool PtrTryGetInt64(JsonValue* handle, const char* path, std::variant<int64_t, uint64_t>* out_value) = 0;
+	virtual bool PtrTryGetInt64(JsonValue* handle, const char* path, int64_t* out_value) = 0;
+
+	/**
+	 * Try to get unsigned 64-bit integer value using JSON Pointer
+	 * @param handle JSON value
+	 * @param path JSON Pointer path
+	 * @param out_value Pointer to receive unsigned 64-bit integer value
+	 * @return true on success, false if not found or type mismatch
+	 */
+	virtual bool PtrTryGetUint64(JsonValue* handle, const char* path, uint64_t* out_value) = 0;
 
 	/**
 	 * Try to get string value using JSON Pointer (returns false on failure)
@@ -1575,69 +1760,19 @@ public:
 	 */
 	virtual bool PtrTryGetString(JsonValue* handle, const char* path, const char** out_str, size_t* out_len) = 0;
 
-	// Note: Iterators are stateful and stored in the JsonValue object
-	// Call these functions in a loop until they return false
-
-	/**
-	 * Get next key-value pair from object iterator
-	 * @param handle JSON object
-	 * @param out_key Pointer to receive key string
-	 * @param out_key_len Pointer to receive key length (can be nullptr)
-	 * @param out_value Pointer to receive value (creates new JsonValue)
-	 * @return true if iteration continues, false if iteration complete
-	 * @note Iterator state is maintained in handle. Returns false when iteration completes.
-	 * @deprecated Use JSONObjIter instead for better iterator support
-	 */
-	virtual bool ObjectForeachNext(JsonValue* handle, const char** out_key,
-	                                size_t* out_key_len, JsonValue** out_value) = 0;
-
-	/**
-	 * Get next index-value pair from array iterator
-	 * @param handle JSON array
-	 * @param out_index Pointer to receive current index
-	 * @param out_value Pointer to receive value (creates new JsonValue)
-	 * @return true if iteration continues, false if iteration complete
-	 * @note Iterator state is maintained in handle. Returns false when iteration completes.
-	 * @deprecated Use JSONArrIter instead for better iterator support
-	 */
-	virtual bool ArrayForeachNext(JsonValue* handle, size_t* out_index,
-	                               JsonValue** out_value) = 0;
-
-	/**
-	 * Get next key from object iterator (key only, no value)
-	 * @param handle JSON object
-	 * @param out_key Pointer to receive key string
-	 * @param out_key_len Pointer to receive key length (can be nullptr)
-	 * @return true if iteration continues, false if iteration complete
-	 * @note Iterator state is maintained in handle. Returns false when iteration completes.
-	 * @deprecated Use JSONObjIter instead for better iterator support
-	 */
-	virtual bool ObjectForeachKeyNext(JsonValue* handle, const char** out_key,
-	                                   size_t* out_key_len) = 0;
-
-	/**
-	 * Get next index from array iterator (index only, no value)
-	 * @param handle JSON array
-	 * @param out_index Pointer to receive current index
-	 * @return true if iteration continues, false if iteration complete
-	 * @note Iterator state is maintained in handle. Returns false when iteration completes.
-	 * @deprecated Use JSONArrIter instead for better iterator support
-	 */
-	virtual bool ArrayForeachIndexNext(JsonValue* handle, size_t* out_index) = 0;
-
 	/**
 	 * Release a JsonValue object
 	 * External extensions should use this instead of deleting directly
 	 * @param value The JsonValue to release
 	 */
-	virtual void Release(JsonValue* value) = 0;
+	virtual void ReleaseJsonValue(JsonValue* value) = 0;
 
 	/**
 	 * Get the HandleType_t for JSON handles
 	 * External extensions MUST use this method to obtain the handle type
 	 * @return The HandleType_t for JSON handles
 	 */
-	virtual HandleType_t GetJsonHandleType() = 0;
+	virtual SourceMod::HandleType_t GetJsonHandleType() = 0;
 
 	/**
 	 * Read JsonValue from a SourceMod handle
@@ -1645,7 +1780,7 @@ public:
 	 * @param handle Handle to read from
 	 * @return JsonValue pointer, or nullptr on error (error will be reported to context)
 	 */
-	virtual JsonValue* GetValueFromHandle(IPluginContext* pContext, Handle_t handle) = 0;
+	virtual JsonValue* GetValueFromHandle(SourcePawn::IPluginContext* pContext, SourceMod::Handle_t handle) = 0;
 
 	/**
 	 * Initialize an array iterator (same as ArrIterWith but returns pointer)
@@ -1696,16 +1831,16 @@ public:
 	/**
 	 * Remove current element from array (mutable only)
 	 * @param iter Mutable array iterator
-	 * @return Pointer to removed value, or nullptr on error
+	 * @return true on success, false if iterator is invalid, immutable, or not positioned
 	 */
-	virtual void* ArrIterRemove(JsonArrIter* iter) = 0;
+	virtual bool ArrIterRemove(JsonArrIter* iter) = 0;
 
 	/**
 	 * Initialize an object iterator (same as ObjIterWith but returns pointer)
 	 * @param handle JSON object value
 	 * @return New object iterator or nullptr on error
 	 * @note Caller must release the iterator using ReleaseObjIter() once finished
-	 * @note Iterators are single-pass; once ObjIterNext() returns nullptr, create a new iterator or call ObjIterReset() to iterate again
+	 * @note Iterators are single-pass; once ObjIterNext() returns false, create a new iterator or call ObjIterReset() to iterate again
 	 */
 	virtual JsonObjIter* ObjIterInit(JsonValue* handle) = 0;
 
@@ -1714,7 +1849,7 @@ public:
 	 * @param handle JSON object value
 	 * @return New object iterator or nullptr on error
 	 * @note Caller must release the iterator using ReleaseObjIter() once finished
-	 * @note Iterators are single-pass; once ObjIterNext() returns nullptr, create a new iterator or call ObjIterReset() to iterate again
+	 * @note Iterators are single-pass; once ObjIterNext() returns false, create a new iterator or call ObjIterReset() to iterate again
 	 */
 	virtual JsonObjIter* ObjIterWith(JsonValue* handle) = 0;
 
@@ -1728,9 +1863,12 @@ public:
 	/**
 	 * Get next key from object iterator
 	 * @param iter Object iterator
-	 * @return Key value (yyjson_val* for immutable, yyjson_mut_val* for mutable), or nullptr if iteration complete
+	 * @param out_key Output pointer to the current key string owned by the JSON document
+	 * @param out_len Optional output key length
+	 * @return true if a key was produced, false when iteration is complete
+	 * @note The returned key string is owned by the JSON document and must not be freed.
 	 */
-	virtual void* ObjIterNext(JsonObjIter* iter) = 0;
+	virtual bool ObjIterNext(JsonObjIter* iter, const char** out_key, size_t* out_len = nullptr) = 0;
 
 	/**
 	 * Check if object iterator has more elements
@@ -1740,12 +1878,11 @@ public:
 	virtual bool ObjIterHasNext(JsonObjIter* iter) = 0;
 
 	/**
-	 * Get value by key from object iterator
+	 * Get the value at the current object iterator position
 	 * @param iter Object iterator
-	 * @param key Key value (yyjson_val* or yyjson_mut_val*)
-	 * @return JSON value wrapper for the value, or nullptr on error
+	 * @return JSON value wrapper for the current value, or nullptr if the iterator is not positioned
 	 */
-	virtual JsonValue* ObjIterGetVal(JsonObjIter* iter, void* key) = 0;
+	virtual JsonValue* ObjIterGetVal(JsonObjIter* iter) = 0;
 
 	/**
 	 * Iterates to a specified key and returns the value
@@ -1767,20 +1904,9 @@ public:
 	/**
 	 * Remove current key-value pair from object (mutable only)
 	 * @param iter Mutable object iterator
-	 * @return Pointer to removed key, or nullptr on error
+	 * @return true on success, false if iterator is invalid, immutable, or not positioned
 	 */
-	virtual void* ObjIterRemove(JsonObjIter* iter) = 0;
-
-	/**
-	 * Get key string from object iterator key pointer
-	 * @param iter Object iterator
-	 * @param key Key pointer (returned from ObjIterNext)
-	 * @param out_str Pointer to receive key string
-	 * @param out_len Pointer to receive key length (optional)
-	 * @return true on success, false on error
-	 * @note Do not free the returned string - it is owned by the JSON document
-	 */
-	virtual bool ObjIterGetKeyString(JsonObjIter* iter, void* key, const char** out_str, size_t* out_len = nullptr) = 0;
+	virtual bool ObjIterRemove(JsonObjIter* iter) = 0;
 
 	/**
 	 * Release an array iterator
@@ -1798,13 +1924,13 @@ public:
 	 * Get the HandleType_t for array iterator handles
 	 * @return The HandleType_t for array iterator handles
 	 */
-	virtual HandleType_t GetArrIterHandleType() = 0;
+	virtual SourceMod::HandleType_t GetArrIterHandleType() = 0;
 
 	/**
 	 * Get the HandleType_t for object iterator handles
 	 * @return The HandleType_t for object iterator handles
 	 */
-	virtual HandleType_t GetObjIterHandleType() = 0;
+	virtual SourceMod::HandleType_t GetObjIterHandleType() = 0;
 
 	/**
 	 * Read JsonArrIter from a SourceMod handle
@@ -1812,7 +1938,7 @@ public:
 	 * @param handle Handle to read from
 	 * @return JsonArrIter pointer, or nullptr on error
 	 */
-	virtual JsonArrIter* GetArrIterFromHandle(IPluginContext* pContext, Handle_t handle) = 0;
+	virtual JsonArrIter* GetArrIterFromHandle(SourcePawn::IPluginContext* pContext, SourceMod::Handle_t handle) = 0;
 
 	/**
 	 * Read JsonObjIter from a SourceMod handle
@@ -1820,7 +1946,7 @@ public:
 	 * @param handle Handle to read from
 	 * @return JsonObjIter pointer, or nullptr on error
 	 */
-	virtual JsonObjIter* GetObjIterFromHandle(IPluginContext* pContext, Handle_t handle) = 0;
+	virtual JsonObjIter* GetObjIterFromHandle(SourcePawn::IPluginContext* pContext, SourceMod::Handle_t handle) = 0;
 
 	/**
 	 * Read a JSON number from string
@@ -1889,14 +2015,24 @@ public:
 	virtual bool SetInt(JsonValue* handle, int value) = 0;
 
 	/**
-	 * Directly modify a JSON value to 64-bit integer type (auto-detects signed/unsigned)
+	 * Directly modify a JSON value to signed 64-bit integer type
 	 * @param handle JSON value to modify (cannot be object or array)
-	 * @param value 64-bit integer value (std::variant<int64_t, uint64_t>)
+	 * @param value Signed 64-bit integer value
 	 * @return true on success, false if handle is object or array
 	 * @warning For immutable documents, this breaks immutability. Use with caution.
 	 * @note This modifies the value in-place without creating a new value
 	 */
-	virtual bool SetInt64(JsonValue* handle, std::variant<int64_t, uint64_t> value) = 0;
+	virtual bool SetInt64(JsonValue* handle, int64_t value) = 0;
+
+	/**
+	 * Directly modify a JSON value to unsigned 64-bit integer type
+	 * @param handle JSON value to modify (cannot be object or array)
+	 * @param value Unsigned 64-bit integer value
+	 * @return true on success, false if value is object or array
+	 * @warning For immutable documents, this breaks immutability. Use with caution.
+	 * @note This modifies the value in-place without creating a new value
+	 */
+	virtual bool SetUint64(JsonValue* handle, uint64_t value) = 0;
 
 	/**
 	 * Directly modify a JSON value to floating-point type
@@ -1928,18 +2064,4 @@ public:
 	 */
 	virtual bool SetNull(JsonValue* handle) = 0;
 
-	/**
-	 * Parse an int64 string value into a variant (int64_t or uint64_t)
-	 * @param value String representation of the integer
-	 * @param out_value Output variant to store the parsed value
-	 * @param error Error buffer (optional)
-	 * @param error_size Error buffer size
-	 * @return true on success, false on parse error
-	 * @note Auto-detects whether to use signed or unsigned based on value range
-	 * @note Negative values are stored as int64_t, large positive values may be stored as uint64_t
-	 */
-	virtual bool ParseInt64Variant(const char* value, std::variant<int64_t, uint64_t>* out_value,
-		char* error = nullptr, size_t error_size = 0) = 0;
 };
-
-#endif // _INCLUDE_IJSONMANAGER_H_

@@ -21,23 +21,46 @@ Performance test results using [twitter.json](https://github.com/ibireme/yyjson_
 
 ```
 === JSON Performance Benchmark ===
-Test iterations: 100
-Data size: 0.60 MB
-Parse time: 0.025 seconds
-Stringify time: 0.013 seconds
-Parse operations per second: 3937.93 ops/sec
-Parse speed: 2371.66 MB/s (2.31 GB/s)
-Stringify speed: 4505.23 MB/s (4.39 GB/s)
-Stringify operations per second: 7480.55 ops/sec
-=== JSON Performance Benchmark End ===
+[Parse/Stringify] Data: 0.60 MB
+  Parse: 3530.69 ops/sec (2126.39 MB/s)
+  Stringify: 8034.25 ops/sec (4838.70 MB/s)
+
+[Object Operations] Iterations: 10000
+  Create+Set: 4384042.50 ops/sec
+  Get: 7698229.50 ops/sec
+  HasKey: 7722008.00 ops/sec
+
+[Array Operations] Iterations: 10000
+  Create+Push: 5241090.00 ops/sec
+  Get: 19157088.00 ops/sec
+  Set: 13477089.00 ops/sec
+
+[Clone Operations] Iterations: 1000
+  DeepCopy: 1610305.87 ops/sec
+
+[Iteration] Iterations: 1000
+  Object: 100010.00 ops/sec
+  Array: 147405.65 ops/sec
+
+[JSON Pointer] Iterations: 10000
+  PtrGet: 26525200.00 ops/sec
+  PtrSet: 22573364.00 ops/sec
+
+[JSON Patch] Iterations: 100000
+  ApplyPatch: 3386501.50 ops/sec
+  MergePatch: 4000640.25 ops/sec
+=== Benchmark Complete ===
 ```
 
 Test environment:
 - OS: Ubuntu 22.04
 - CPU: AMD Ryzen 9 7950X3D
 - Test data: [twitter.json](https://github.com/ibireme/yyjson_benchmark/blob/master/data/json/twitter.json)
-- Test iterations: 100
-- SourceMod Version: 1.13.0.6966
+- Test iterations:
+  - TEST_ITERATIONS 1000
+  - SMALL_ITERATIONS 10000
+  - LARGE_ITERATIONS 100000
+- SourceMod Version: 1.13.0.5
 - YYJSON Version: Latest version
 - Test script: [json_perf_test.sp](scripting/json_perf_test.sp)
 
@@ -46,22 +69,20 @@ Note: Performance may vary depending on server hardware and load conditions.
 ## Building from Source
 ```bash
 # Clone the repository
-git clone https://github.com/ProjectSky/sm-ext-yyjson.git
-cd sm-ext-yyjson
+git clone --recurse-submodules https://github.com/ProjectSky/sm-ext-json.git
+cd sm-ext-json
 
 # Create build directory
 mkdir build && cd build
 
 # Configure and build
-python ../configure.py --enable-optimize --symbol-files \
-    --sm-path=YOUR_SOURCEMOD_PATH \
-    --targets=x64,x86
+python ../configure.py --enable-optimize --sm-path=YOUR_SOURCEMOD_PATH --targets=x64,x86
 ambuild
 ```
 
 ## Documentation
-* [API Reference](https://github.com/ProjectSky/sm-ext-yyjson/blob/main/scripting/include/json.inc)
-* [Latest Release](https://github.com/ProjectSky/sm-ext-yyjson/releases)
+* [API Reference](scripting/include/json.inc)
+* [Latest Release](https://github.com/ProjectSky/sm-ext-json/releases)
 
 ### SourceMod Extension API
 ```cpp
@@ -81,18 +102,23 @@ void Ext::SDK_OnAllLoaded()
     return;
   }
 
-  size_t size = g_pJsonManager->GetSerializedSize(val);
-  char buffer[size];
-  g_pJsonManager->WriteToString(val, buffer, size);
-
-  // must release the value after using
-  g_pJsonManager->Release(val);
+  char* buffer = g_pJsonManager->WriteToStringPtr(val);
+  if (!buffer) {
+    g_pJsonManager->ReleaseJsonValue(val);
+    PrintToServer("Failed to serialize JSON");
+    return;
+  }
 
   printf("JSON: %s\n", buffer);
+  // Must release the string returned by WriteToStringPtr() with ReleaseString() after using.
+  g_pJsonManager->ReleaseString(buffer);
+
+  // Must release the value after using.
+  g_pJsonManager->ReleaseJsonValue(val);
 }
 ```
 
-### Basic Examples
+### SourcePawn API Examples
 
 #### Working with Objects
 ```cpp
@@ -214,6 +240,7 @@ while ((value = iter.Next) != null) {
   PrintToServer("Index: %d", iter.Index);
   delete value;
 }
+// Values returned by Next must be released, and the iterator must be released as well.
 delete iter;
 
 // Method 2: Classic iteration

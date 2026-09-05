@@ -121,88 +121,30 @@ methodmap JSON < Handle
   public static native any Pack(const char[] format, any ...);
 
   /**
-  * Iterates over the object's key-value pairs
-  *
-  * @deprecated              Use JSONObjIter instead
-  *
-  * @note                    Needs to be freed using delete or CloseHandle()
-  *
-  * @param buffer            Buffer to copy key name to
-  * @param maxlength         Maximum length of the string buffer
-  * @param value             JSON handle to store the current value
-  *
-  * @return                  True if there are more elements, false when iteration is complete
-  * @error                   Invalid handle or handle is not an object
-  */
-  #pragma deprecated Use JSONObjIter instead.
-  public native bool ForeachObject(char[] buffer, int maxlength, JSON &value);
-
-  /**
-  * Iterates over the array's values
-  *
-  * @deprecated              Use JSONArrIter instead
-  *
-  * @note                    Needs to be freed using delete or CloseHandle()
-  *
-  * @param index             Variable to store current array index (starting from 0)
-  * @param value             JSON handle to store the current value
-  *
-  * @return                  True if there are more elements, false when iteration is complete
-  * @error                   Invalid handle or handle is not an array
-  */
-  #pragma deprecated Use JSONArrIter instead.
-  public native bool ForeachArray(int &index, JSON &value);
-
-  /**
-  * Same as ForeachObject, but only iterates over the object's keys
-  *
-  * @deprecated              Use JSONObjIter instead
-  *
-  * @note                    Use this when you only need keys (faster than ForeachObject since it doesn't create value handles)
-  *
-  * @param buffer            Buffer to copy key name to
-  * @param maxlength         Maximum length of the string buffer
-  *
-  * @return                  True if there are more elements, false when iteration is complete
-  * @error                   Invalid handle or handle is not an object
-  */
-  #pragma deprecated Use JSONObjIter instead.
-  public native bool ForeachKey(char[] buffer, int maxlength);
-
-  /**
-  * Same as ForeachArray, but only iterates over the array's indexes
-  *
-  * @deprecated              Use JSONArrIter instead
-  *
-  * @note                    Use this when you only need indexes (faster than ForeachArray since it doesn't create value handles)
-  *
-  * @param index             Variable to store current array index (starting from 0)
-  *
-  * @return                  True if there are more elements, false when iteration is complete
-  * @error                   Invalid handle or handle is not an array
-  */
-  #pragma deprecated Use JSONArrIter instead.
-  public native bool ForeachIndex(int &index);
-
-  /**
   * Converts an immutable JSON document to a mutable one
   *
   * @note                    Needs to be freed using delete or CloseHandle()
+  * @note                    Creates a deep copy as a mutable document
   *
-  * @return                  Handle to the new mutable JSON document, INVALID_HANDLE on failure
-  * @error                   If the document is already mutable
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  *
+  * @return                  Handle to the new mutable JSON document, null if already mutable or on error
   */
-  public native any ToMutable();
+  public native any ToMutable(char[] error = "", int error_size = 0);
 
   /**
   * Converts a mutable JSON document to an immutable one
   *
   * @note                    Needs to be freed using delete or CloseHandle()
+  * @note                    Creates a deep copy as an immutable document
   *
-  * @return                  Handle to the new immutable JSON document, INVALID_HANDLE on failure
-  * @error                   If the document is already immutable
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  *
+  * @return                  Handle to the new immutable JSON document, null if already immutable or on error
   */
-  public native any ToImmutable();
+  public native any ToImmutable(char[] error = "", int error_size = 0);
 
   /**
    * Apply a JSON Patch (RFC 6902) to this value and return a new JSON handle
@@ -211,11 +153,12 @@ methodmap JSON < Handle
    *
    * @param patch             JSON Patch document
    * @param resultMutable     True to return a mutable result, false for immutable
+   * @param error             Optional buffer to store error message
+   * @param error_size        Size of error buffer
    *
-   * @return                  New JSON handle on success
-   * @error                   Throws if the patch cannot be applied
+   * @return                  New JSON handle on success, null on failure
    */
-  public native any ApplyJsonPatch(const JSON patch, bool resultMutable = false);
+  public native any ApplyJsonPatch(const JSON patch, bool resultMutable = false, char[] error = "", int error_size = 0);
 
   /**
    * Apply a JSON Patch (RFC 6902) to this value in place
@@ -234,11 +177,12 @@ methodmap JSON < Handle
    *
    * @param patch             JSON Merge Patch document
    * @param resultMutable     True to return a mutable result, false for immutable
+   * @param error             Optional buffer to store error message
+   * @param error_size        Size of error buffer
    *
-   * @return                  New JSON handle on success
-   * @error                   Throws if the merge patch cannot be applied
+   * @return                  New JSON handle on success, null on failure
    */
-  public native any ApplyMergePatch(const JSON patch, bool resultMutable = false);
+  public native any ApplyMergePatch(const JSON patch, bool resultMutable = false, char[] error = "", int error_size = 0);
 
   /**
    * Apply a JSON Merge Patch (RFC 7396) to this value in place
@@ -273,6 +217,28 @@ methodmap JSON < Handle
   * @return                  Number of characters written to the buffer (including null terminator) or 0 on failure
   */
   public native int ToString(char[] buffer, int maxlength, JSON_WRITE_FLAG flag = JSON_WRITE_NOFLAG);
+
+  /**
+  * Write JSON to string buffer (zero-allocation version)
+  *
+  * @note                    This is a zero-allocation version that writes directly to the buffer
+  * @note                    Provides approximately 15% better performance compared to ToString()
+  * @note                    The buffer must be large enough to accommodate temporary formatting space:
+  *                          - Number: 40 bytes
+  *                          - String: 16 + (str_len * 6) bytes
+  *                          - Other values: 16 bytes
+  *                          - Nesting depth: 16 * max_json_depth bytes
+  * @note                    GetSerializedSize() only returns the final JSON size, NOT including the temporary space.
+  *                          For most use cases, prefer ToString() for simplicity
+  *
+  * @param buffer            String buffer to write to
+  * @param maxlength         Maximum length of the string buffer
+  * @param flag              The JSON write options
+  *
+  * @return                  Number of characters written to the buffer (including null terminator) or 0 on failure
+  * @error                   Invalid handle or buffer too small
+  */
+  public native int ToStringDirect(char[] buffer, int maxlength, JSON_WRITE_FLAG flag = JSON_WRITE_NOFLAG);
 
   /**
   * Write a JSON number value to string buffer
@@ -320,7 +286,7 @@ methodmap JSON < Handle
   * Directly modify a JSON value to boolean type
   *
   * @note                    This modifies the value in-place without creating a new value
-  * @note                    For immutable documents, this breaks immutability. Use with caution
+  * @warning                 For immutable documents, this breaks immutability. Use with caution
   *
   * @param value             Boolean value
   *
@@ -333,7 +299,7 @@ methodmap JSON < Handle
   * Directly modify a JSON value to integer type
   *
   * @note                    This modifies the value in-place without creating a new value
-  * @note                    For immutable documents, this breaks immutability. Use with caution
+  * @warning                 For immutable documents, this breaks immutability. Use with caution
   *
   * @param value             Integer value
   *
@@ -346,7 +312,7 @@ methodmap JSON < Handle
   * Directly modify a JSON value to 64-bit integer type
   *
   * @note                    This modifies the value in-place without creating a new value
-  * @note                    For immutable documents, this breaks immutability. Use with caution
+  * @warning                 For immutable documents, this breaks immutability. Use with caution
   * @note                    This function auto-detects whether the value is signed or unsigned
   *
   * @param value             64-bit integer value (as string, can be signed or unsigned)
@@ -360,7 +326,7 @@ methodmap JSON < Handle
   * Directly modify a JSON value to floating-point type
   *
   * @note                    This modifies the value in-place without creating a new value
-  * @note                    For immutable documents, this breaks immutability. Use with caution
+  * @warning                 For immutable documents, this breaks immutability. Use with caution
   *
   * @param value             Float value
   *
@@ -373,7 +339,9 @@ methodmap JSON < Handle
   * Directly modify a JSON value to string type
   *
   * @note                    This modifies the value in-place without creating a new value
-  * @note                    For immutable documents, this breaks immutability and does NOT copy the string. Use with caution
+  * @note                    For mutable documents, the string is copied into the document's memory pool
+  * @warning                 For immutable documents, this breaks immutability and does NOT copy the string. Use with caution
+  * @warning                 For immutable documents, the string pointer must remain valid for the document's lifetime
   *
   * @param value             String value
   *
@@ -386,7 +354,7 @@ methodmap JSON < Handle
   * Directly modify a JSON value to null type
   *
   * @note                    This modifies the value in-place without creating a new value
-  * @note                    For immutable documents, this breaks immutability. Use with caution
+  * @warning                 For immutable documents, this breaks immutability. Use with caution
   *
   * @return                  True on success, false if value is object or array
   * @error                   Invalid handle or handle is object or array
@@ -402,10 +370,12 @@ methodmap JSON < Handle
   * @param is_file           True to treat string param as file, false otherwise
   * @param is_mutable_doc    True to create a mutable document, false to create an immutable one
   * @param flag              The JSON read options
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  JSON handle, false on failure
+  * @return                  JSON handle, null on failure
   */
-  public static native any Parse(const char[] string, bool is_file = false, bool is_mutable_doc = false, JSON_READ_FLAG flag = JSON_READ_NOFLAG);
+  public static native any Parse(const char[] string, bool is_file = false, bool is_mutable_doc = false, JSON_READ_FLAG flag = JSON_READ_NOFLAG, char[] error = "", int error_size = 0);
 
   /**
   * Read a JSON number from string
@@ -417,25 +387,29 @@ methodmap JSON < Handle
   * @param dat               The JSON data (UTF-8 without BOM), null-terminator is required
   * @param flag              Read flags (JSON_READ_FLAG values, default: JSON_READ_NOFLAG)
   * @param consumed          Variable to store number of characters consumed (optional)
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  New JSON number value or null on error
-  * @error                   If input data is invalid or number parsing fails
+  * @return                  New JSON number value, null on failure
   */
-  public static native JSON ReadNumber(const char[] dat, JSON_READ_FLAG flag = JSON_READ_NOFLAG, int &consumed = 0);
+  public static native JSON ReadNumber(const char[] dat, JSON_READ_FLAG flag = JSON_READ_NOFLAG, int &consumed = 0, char[] error = "", int error_size = 0);
 
   /**
   * Creates a deep copy of a JSON value and returns it as a new JSON handle
   *
   * @note                    Needs to be freed using delete or CloseHandle()
-  * @note                    This function is recursive and may cause a stack overflow if the object level is too deep
+  * @note                    The returned value is owned by targetDoc's document context
   * @note                    The mutability of the returned copy depends on the targetDoc parameter
+  * @warning                 This function is recursive and may cause a stack overflow if the object level is too deep
   *
   * @param targetDoc         The target document that determines whether the copy will be mutable or immutable
   * @param sourceValue       The source JSON value to be copied
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  New JSON handle on success, false on failure
+  * @return                  New JSON handle on success, null on failure
   */
-  public static native any DeepCopy(const JSON targetDoc, const JSON sourceValue);
+  public static native any DeepCopy(const JSON targetDoc, const JSON sourceValue, char[] error = "", int error_size = 0);
 
   /**
   * Returns the JSON value's type description
@@ -478,7 +452,7 @@ methodmap JSON < Handle
   *
   * @param value             The boolean value to be set
   *
-  * @return                  JSON handle, null on error
+  * @return                  JSON handle
   */
   public static native JSON CreateBool(bool value);
 
@@ -489,7 +463,7 @@ methodmap JSON < Handle
   *
   * @param value             The float value to be set
   *
-  * @return                  JSON handle, null on error
+  * @return                  JSON handle
   */
   public static native JSON CreateFloat(float value);
 
@@ -500,7 +474,7 @@ methodmap JSON < Handle
   *
   * @param value             The int value to be set
   *
-  * @return                  JSON handle, null on error
+  * @return                  JSON handle
   */
   public static native JSON CreateInt(int value);
 
@@ -511,10 +485,12 @@ methodmap JSON < Handle
   * @note                    This function auto-detects whether the value is signed or unsigned
   *
   * @param value             The integer64 value to be set (can be signed or unsigned)
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  JSON handle, null on error
+  * @return                  JSON handle
   */
-  public static native JSON CreateInt64(const char[] value);
+  public static native JSON CreateInt64(const char[] value, char[] error = "", int error_size = 0);
 
   /**
   * Creates and returns a string value
@@ -523,7 +499,7 @@ methodmap JSON < Handle
   *
   * @param value             The string value to be set
   *
-  * @return                  JSON handle, null on error
+  * @return                  JSON handle
   */
   public static native JSON CreateString(const char[] value);
 
@@ -532,7 +508,7 @@ methodmap JSON < Handle
   *
   * @note                    Needs to be freed using delete or CloseHandle()
   *
-  * @return                  JSON handle, null on error
+  * @return                  JSON handle
   */
   public static native JSON CreateNull();
 
@@ -600,10 +576,12 @@ methodmap JSON < Handle
   * @note                    JSON Pointer paths are always resolved from the document root, not from the current value
   *
   * @param path              The JSON pointer string
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  The value referenced by the JSON pointer
+  * @return                  The value referenced by the JSON pointer, null on failure
   */
-  public native any PtrGet(const char[] path);
+  public native any PtrGet(const char[] path, char[] error = "", int error_size = 0);
 
   /**
   * Get boolean value by a JSON Pointer
@@ -883,18 +861,6 @@ methodmap JSON < Handle
   public native bool PtrRemove(const char[] path);
 
   /**
-  * Try to get value by a JSON Pointer
-  *
-  * @note                    JSON Pointer paths are always resolved from the document root, not from the current value
-  *
-  * @param path              The JSON pointer string
-  * @param value             Handle to store value
-  *
-  * @return                  true on success, false otherwise
-  */
-  public native bool PtrTryGetVal(const char[] path, JSON &value);
-
-  /**
   * Try to get boolean value by a JSON Pointer
   *
   * @note                    JSON Pointer paths are always resolved from the document root, not from the current value
@@ -1107,6 +1073,8 @@ methodmap JSON < Handle
   * @note                    Only works on immutable documents (parsed from JSON)
   * @note                    Returns 0 for mutable documents or null handles
   * @note                    Useful for performance planning and memory estimation
+  * @note                    Counts ALL values including containers, keys, and leaf values
+  *                          Example: {"a":1,"b":2,"c":3} returns 7 (1 object + 3 keys + 3 values)
   */
   property int ValCount {
     public native get();
@@ -1132,12 +1100,13 @@ methodmap JSONObject < JSON
   *
   * @param pairs             Array of strings containing alternating keys and values
   * @param size              Total size of the array (must be even)
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  New JSON object handle
-  * @error                   If array size is invalid, any key is empty, or if creation fails
+  * @return                  New JSON object handle, null on failure
   *
   */
-  public static native JSONObject FromStrings(const char[][] pairs, int size);
+  public static native JSONObject FromStrings(const char[][] pairs, int size, char[] error = "", int error_size = 0);
 
   /**
   * Loads a JSON object from a file
@@ -1146,10 +1115,12 @@ methodmap JSONObject < JSON
   *
   * @param file              File to read from
   * @param flag              The JSON read options
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  Object handle, or null on failure
+  * @return                  Object handle, null on failure
   */
-  public static native JSONObject FromFile(const char[] file, JSON_READ_FLAG flag = JSON_READ_NOFLAG);
+  public static native JSONObject FromFile(const char[] file, JSON_READ_FLAG flag = JSON_READ_NOFLAG, char[] error = "", int error_size = 0);
 
   /**
   * Loads a JSON object from a string
@@ -1158,10 +1129,12 @@ methodmap JSONObject < JSON
   *
   * @param buffer            String buffer to load into the JSON object
   * @param flag              The JSON read options
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  Object handle, or null on failure
+  * @return                  Object handle, null on failure
   */
-  public static native JSONObject FromString(const char[] buffer, JSON_READ_FLAG flag = JSON_READ_NOFLAG);
+  public static native JSONObject FromString(const char[] buffer, JSON_READ_FLAG flag = JSON_READ_NOFLAG, char[] error = "", int error_size = 0);
 
   /**
   * Gets a value from the object
@@ -1170,10 +1143,12 @@ methodmap JSONObject < JSON
   * @note                    This function takes a linear search time
   *
   * @param key               Key name
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  Returns the value to which the specified key is mapped, or null if this object contains no mapping for the key
+  * @return                  Returns the value to which the specified key is mapped, or null if key not found
   */
-  public native any Get(const char[] key);
+  public native any Get(const char[] key, char[] error = "", int error_size = 0);
 
   /**
   * Sets a value in the object
@@ -1241,11 +1216,13 @@ methodmap JSONObject < JSON
   *
   * @note                    Needs to be freed using delete or CloseHandle()
   *
-  * @param index             Position from which get key name
+  * @param index             Position from which to get the value
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
-  * @return                  Returns the value to which index
+  * @return                  Returns the value to which index, or null if index out of bounds
   */
-  public native any GetValueAt(int index);
+  public native any GetValueAt(int index, char[] error = "", int error_size = 0);
 
   /**
   * Returns whether or not a key exists in the object
@@ -1357,6 +1334,7 @@ methodmap JSONObject < JSON
   * Removes a key and its value in the object
   *
   * @note                    This function takes a linear search time
+  * @note                    If duplicate keys exist, all matching key-value pairs are removed
   *
   * @param key               Key name
   *
@@ -1387,8 +1365,9 @@ methodmap JSONObject < JSON
   /**
   * Rotates key-value pairs in the object
   *
-  * @note                    This function takes a linear search time
+  * @warning                 This function takes linear time proportional to the rotation amount
   * @note                    Only works on mutable objects
+  * @note                    Valid range: 0 <= idx < object size
   * @note                    Example: {"a":1,"b":2,"c":3,"d":4} rotate 1 becomes {"b":2,"c":3,"d":4,"a":1}
   *
   * @param idx               Number of positions to rotate
@@ -1422,9 +1401,11 @@ methodmap JSONArray < JSON
   *
   * @param strings           Array of strings to create array from
   * @param size              Size of the array
-  * @return                  New JSON array handle, or null if creation failed
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  * @return                  New JSON array handle, null on failure
   */
-  public static native JSONArray FromStrings(const char[][] strings, int size);
+  public static native JSONArray FromStrings(const char[][] strings, int size, char[] error = "", int error_size = 0);
 
   /**
   * Creates a new JSON array from an array of integer values
@@ -1433,9 +1414,11 @@ methodmap JSONArray < JSON
   *
   * @param values            Array of int values to create array from
   * @param size              Size of the array
-  * @return                  New JSON array handle, or null if creation failed
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  * @return                  New JSON array handle, null on failure
   */
-  public static native JSONArray FromInt(const int[] values, int size);
+  public static native JSONArray FromInt(const int[] values, int size, char[] error = "", int error_size = 0);
 
   /**
   * Creates a new JSON array from an array of 64-bit integer strings (auto-detects signed/unsigned)
@@ -1444,10 +1427,11 @@ methodmap JSONArray < JSON
   *
   * @param values            Array of int64 string values (can be signed or unsigned)
   * @param size              Size of the array
-  * @return                  New JSON array handle, or null if creation failed
-  * @error                   If any value cannot be parsed as int64
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  * @return                  New JSON array handle, null on failure
   */
-  public static native JSONArray FromInt64(const char[][] values, int size);
+  public static native JSONArray FromInt64(const char[][] values, int size, char[] error = "", int error_size = 0);
 
   /**
   * Creates a new JSON array from an array of boolean values
@@ -1456,9 +1440,11 @@ methodmap JSONArray < JSON
   *
   * @param values            Array of bool values to create array from
   * @param size              Size of the array
-  * @return                  New JSON array handle, or null if creation failed
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  * @return                  New JSON array handle, null on failure
   */
-  public static native JSONArray FromBool(const bool[] values, int size);
+  public static native JSONArray FromBool(const bool[] values, int size, char[] error = "", int error_size = 0);
 
   /**
   * Creates a new JSON array from an array of float values
@@ -1467,9 +1453,11 @@ methodmap JSONArray < JSON
   *
   * @param values            Array of float values to create array from
   * @param size              Size of the array
-  * @return                  New JSON array handle, or null if creation failed
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  * @return                  New JSON array handle, null on failure
   */
-  public static native JSONArray FromFloat(const float[] values, int size);
+  public static native JSONArray FromFloat(const float[] values, int size, char[] error = "", int error_size = 0);
 
   /**
   * Loads a JSON array from a file
@@ -1478,9 +1466,11 @@ methodmap JSONArray < JSON
   *
   * @param file              File to read from
   * @param flag              Read flag
-  * @return                  Array handle, or null on failure
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  * @return                  Array handle, null on failure
   */
-  public static native JSONArray FromFile(const char[] file, JSON_READ_FLAG flag = JSON_READ_NOFLAG);
+  public static native JSONArray FromFile(const char[] file, JSON_READ_FLAG flag = JSON_READ_NOFLAG, char[] error = "", int error_size = 0);
 
   /**
   * Loads a JSON array from a string
@@ -1489,9 +1479,11 @@ methodmap JSONArray < JSON
   *
   * @param buffer            String buffer to load into the JSON array
   * @param flag              Read flag
-  * @return                  Array handle, or null on failure
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
+  * @return                  Array handle, null on failure
   */
-  public static native JSONArray FromString(const char[] buffer, JSON_READ_FLAG flag = JSON_READ_NOFLAG);
+  public static native JSONArray FromString(const char[] buffer, JSON_READ_FLAG flag = JSON_READ_NOFLAG, char[] error = "", int error_size = 0);
 
   /**
   * Gets a value from the array
@@ -1500,10 +1492,12 @@ methodmap JSONArray < JSON
   * @note                    This function takes a linear search time
   *
   * @param index             Position in the array (starting from 0)
+  * @param error             Optional buffer to store error message
+  * @param error_size        Size of error buffer
   *
   * @return                  Value handle on success, null if array is empty or index out of bounds
   */
-  public native any Get(int index);
+  public native any Get(int index, char[] error = "", int error_size = 0);
 
   /**
   * Gets a boolean value from the array
@@ -1957,8 +1951,9 @@ methodmap JSONArray < JSON
   /**
   * Rotates array elements
   *
-  * @note                    This function takes a linear search time
+  * @warning                 This function takes linear time proportional to the rotation amount
   * @note                    Only works on mutable arrays
+  * @note                    Valid range: 0 <= idx < array size
   * @note                    Example: [1,2,3,4,5] rotate 2 becomes [3,4,5,1,2]
   *
   * @param idx               Number of positions to rotate
@@ -2007,7 +2002,7 @@ methodmap JSONArrIter < Handle
    *
    * @param array             JSON array value to iterate
    *
-   * @return                  Array iterator handle, or null on failure
+   * @return                  Array iterator handle
    * @error                   Invalid handle or handle is not an array
    */
   public native JSONArrIter(JSON array);
@@ -2058,7 +2053,7 @@ methodmap JSONArrIter < Handle
    * Removes the current element from the array (mutable iterators only)
    *
    * @note                    This function can only be called on mutable iterators
-   * @note                    After calling Remove(), the iterator should not be used to continue iteration
+   * @note                    After calling Remove(), iteration may continue with Next()
    *
    * @return                  True on success, false on failure
    * @error                   Invalid iterator handle or iterator is not mutable
@@ -2077,7 +2072,7 @@ methodmap JSONObjIter < Handle
    *
    * @param obj               JSON object value to iterate
    *
-   * @return                  Object iterator handle, or null on failure
+   * @return                  Object iterator handle
    * @error                   Invalid handle or handle is not an object
    */
   public native JSONObjIter(JSON obj);
@@ -2119,7 +2114,7 @@ methodmap JSONObjIter < Handle
    * @note                    Needs to be freed using delete or CloseHandle()
    * @note                    This should be called after Next() to get the value for the current key
    *
-   * @return                  JSON value handle for the current key's value, or null on failure
+   * @return                  JSON value handle for the current key's value
    * @error                   Invalid iterator handle
    */
   property JSON Value {
@@ -2138,11 +2133,13 @@ methodmap JSONObjIter < Handle
    * @note                    This function takes a linear search time if the key is not nearby
    *
    * @param key               Key name to search for (should be a UTF-8 string with null-terminator)
+   * @param error             Optional buffer to store error message
+   * @param error_size        Size of error buffer
    *
-   * @return                  JSON value handle for the key's value, or null if key not found or input is invalid
+   * @return                  JSON value handle for the key's value, or null if key not found
    * @error                   Invalid iterator handle
    */
-  public native JSON Get(const char[] key);
+  public native JSON Get(const char[] key, char[] error = "", int error_size = 0);
 
   /**
    * Gets the current index in the object iteration
@@ -2158,7 +2155,7 @@ methodmap JSONObjIter < Handle
    * Removes the current key-value pair from the object (mutable iterators only)
    *
    * @note                    This function can only be called on mutable iterators
-   * @note                    After calling Remove(), the iterator should not be used to continue iteration
+   * @note                    After calling Remove(), iteration may continue with Next()
    *
    * @return                  True on success, false on failure
    * @error                   Invalid iterator handle or iterator is not mutable
@@ -2275,6 +2272,7 @@ public void __pl_json_SetNTVOptional()
 
   // JSON
   MarkNativeAsOptional("JSON.ToString");
+  MarkNativeAsOptional("JSON.ToStringDirect");
   MarkNativeAsOptional("JSON.ToFile");
   MarkNativeAsOptional("JSON.Parse");
   MarkNativeAsOptional("JSON.Equals");
@@ -2302,10 +2300,6 @@ public void __pl_json_SetNTVOptional()
   MarkNativeAsOptional("JSON.IsCtn.get");
   MarkNativeAsOptional("JSON.IsMutable.get");
   MarkNativeAsOptional("JSON.IsImmutable.get");
-  MarkNativeAsOptional("JSON.ForeachObject");
-  MarkNativeAsOptional("JSON.ForeachArray");
-  MarkNativeAsOptional("JSON.ForeachKey");
-  MarkNativeAsOptional("JSON.ForeachIndex");
   MarkNativeAsOptional("JSON.ToMutable");
   MarkNativeAsOptional("JSON.ToImmutable");
   MarkNativeAsOptional("JSON.ApplyJsonPatch");
@@ -2361,7 +2355,6 @@ public void __pl_json_SetNTVOptional()
   MarkNativeAsOptional("JSON.PtrAddString");
   MarkNativeAsOptional("JSON.PtrAddNull");
   MarkNativeAsOptional("JSON.PtrRemove");
-  MarkNativeAsOptional("JSON.PtrTryGetVal");
   MarkNativeAsOptional("JSON.PtrTryGetBool");
   MarkNativeAsOptional("JSON.PtrTryGetFloat");
   MarkNativeAsOptional("JSON.PtrTryGetInt");
